@@ -1,25 +1,23 @@
-# Stage 1: Build the JAR using Maven
-FROM eclipse-temurin:17-jdk AS build
+# Stage 1 - Build
 
+FROM maven:3.9-eclipse-temurin-17 AS build
 
+WORKDIR /app
 
-# Copy project files (adjust path if your pom.xml is inside backend/)
-COPY backend/pom.xml .
-COPY backend/src ./src
+COPY pom.xml .
 
-# Install Maven inside container
-RUN apt-get update && apt-get install -y maven
+COPY src ./src
 
-# Build the JAR
 RUN mvn clean package -DskipTests
 
-# Stage 2: Run the JAR
+# Stage 2 - Run
+
 FROM eclipse-temurin:17-jdk
 
 WORKDIR /app
 
-# Copy JAR from build stage
 COPY --from=build /app/target/*.jar app.jar
 
 EXPOSE 8080
+
 ENTRYPOINT ["java", "-jar", "app.jar"]
