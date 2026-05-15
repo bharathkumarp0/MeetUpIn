@@ -1,13 +1,23 @@
 version: "3.8"
 
 services:
+
+  frontend:
+    build: ./ReactFrontend
+    container_name: frontend-app
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend-app
+
   backend-app:
-    build: .
+    build: ./backend
     container_name: backend-app
     ports:
       - "8080:8080"
     depends_on:
       - mysql
+
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/meetupin_db
       SPRING_DATASOURCE_USERNAME: root
@@ -16,14 +26,16 @@ services:
   mysql:
     image: mysql:8.0
     container_name: mysql
+
     restart: always
+
     environment:
       MYSQL_ROOT_PASSWORD: root123
       MYSQL_DATABASE: meetupin_db
-      MYSQL_USER: root
-      MYSQL_PASSWORD: root@123
+
     ports:
       - "3307:3306"
+
     volumes:
       - mysql_data:/var/lib/mysql
 
