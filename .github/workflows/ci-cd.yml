@@ -5,24 +5,32 @@ on:
     branches:
       - main
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
 
   backend:
+    name: Backend CI/CD
+
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: backend
+
     steps:
-      - name: Checkout Code
+
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      - name: Build Backend
+      - name: Build Spring Boot Application
         run: mvn clean package -DskipTests
 
       - name: Login To Docker Hub
@@ -31,32 +39,39 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build Docker Image
-        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/meetup-backend:latest -t ${{ secrets.DOCKER_USERNAME }}/meetup-backend:${{ github.sha }} .
+      - name: Build Backend Docker Image
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/meetup-backend:latest .
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/meetup-backend:${{ github.sha }} .
 
-      - name: Push Docker Image
+      - name: Push Backend Docker Image
         run: |
           docker push ${{ secrets.DOCKER_USERNAME }}/meetup-backend:latest
           docker push ${{ secrets.DOCKER_USERNAME }}/meetup-backend:${{ github.sha }}
 
   frontend:
+    name: Frontend CI/CD
+
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: ReactFrontend
+
     steps:
-      - name: Checkout Code
+
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install Dependencies
+      - name: Install Frontend Dependencies
         run: npm install
 
-      - name: Build Frontend
+      - name: Build React Application
         run: npm run build
 
       - name: Login To Docker Hub
@@ -65,10 +80,12 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build Frontend Image
-        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/meetup-frontend:latest -t ${{ secrets.DOCKER_USERNAME }}/meetup-frontend:${{ github.sha }} .
+      - name: Build Frontend Docker Image
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/meetup-frontend:latest .
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/meetup-frontend:${{ github.sha }} .
 
-      - name: Push Frontend Image
+      - name: Push Frontend Docker Image
         run: |
           docker push ${{ secrets.DOCKER_USERNAME }}/meetup-frontend:latest
           docker push ${{ secrets.DOCKER_USERNAME }}/meetup-frontend:${{ github.sha }}
