@@ -17,7 +17,7 @@ public class CorsConfig {
             public void addCorsMappings(CorsRegistry registry) {
 
                 registry.addMapping("/**")
-                        .allowedOrigins("https://meetup-frontend-em3h.onrender.com")
+                        .allowedOriginPatterns("*")
                         .allowedMethods("*")
                         .allowedHeaders("*");
             }
