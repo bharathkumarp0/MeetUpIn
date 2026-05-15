@@ -1,6 +1,6 @@
 import { useState, useEffect, createContext, useContext } from "react";
 
-const API = "https://meetup-backend-27vw.onrender.com";
+const API = "http://localhost:8080";
 const AuthContext = createContext(null);
 const useAuth = () => useContext(AuthContext);
 
