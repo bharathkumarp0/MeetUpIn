@@ -17,7 +17,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: backend
+       working-directory: backend/backend
 
     steps:
 
