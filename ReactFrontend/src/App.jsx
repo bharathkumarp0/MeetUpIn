@@ -1,7 +1,7 @@
 import { useState, useEffect, createContext, useContext } from "react";
 
 const API = "https://meetup-backend-m2.onrender.com";
-const AuthContext = createContext(null);
+const AuthContext = createContext(null):
 const useAuth = () => useContext(AuthContext);
 
 const CATEGORIES = ["Sports","Music","Tech","Art","Food","Travel","Fitness","Games","Learning","Social"];
