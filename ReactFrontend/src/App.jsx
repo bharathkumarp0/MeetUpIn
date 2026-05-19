@@ -33,7 +33,6 @@ function toast(msg, type = "success") {
 }
 
 // ─── AUTH PROVIDER ────────────────────────────────────────────
-// FIX: On app start, if user has no ID (saved from old session), auto-fetch /me to resolve it
 function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; }
@@ -45,7 +44,6 @@ function AuthProvider({ children }) {
     if (!token || !stored) return;
     try {
       const parsed = JSON.parse(stored);
-      // If user exists but has no id, fetch /me to get the real id
       if (parsed && !parsed.id) {
         fetch(`${API}/api/users/me`, {
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
@@ -164,6 +162,48 @@ function HomePage({ setPage, setSelectedActivity }) {
         </div>
       )}
 
+      {/* simple home page feature cards */}
+      {!user && (
+        <div style={{ margin: "8px 0 28px" }}>
+          <h2 className="section-title" style={{ marginBottom: "16px" }}>Extra Features</h2>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))",
+            gap: "16px"
+          }}>
+            <div style={{
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: "16px",
+              padding: "18px"
+            }}>
+              <div style={{ fontSize: "24px", marginBottom: "10px" }}>🗺️</div>
+              <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "6px", color: "#111827" }}>
+                Map Navigation
+              </div>
+              <div style={{ color: "#6b7280", fontSize: "14px", lineHeight: 1.5 }}>
+                View activity location on map and open directions easily.
+              </div>
+            </div>
+
+            <div style={{
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: "16px",
+              padding: "18px"
+            }}>
+              <div style={{ fontSize: "24px", marginBottom: "10px" }}>📍</div>
+              <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "6px", color: "#111827" }}>
+                Nearby Attractions
+              </div>
+              <div style={{ color: "#6b7280", fontSize: "14px", lineHeight: 1.5 }}>
+                Explore restaurants, cafés, parks, shopping, and attractions near the activity.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="explore-header">
         <h2 className="section-title">{user ? "Explore Activities" : "What's happening"}</h2>
         <div className="search-bar">
@@ -238,6 +278,389 @@ function ActivityCard({ activity: a, onClick }) {
   );
 }
 
+// ─── NEARBY ATTRACTIONS ───────────────────────────────────────
+const PLACE_TYPES = [
+  { key: "restaurant", label: "Restaurants", icon: "🍽️", tags: ["amenity=restaurant", "amenity=fast_food"] },
+  { key: "cafe", label: "Cafés", icon: "☕", tags: ["amenity=cafe"] },
+  { key: "attraction", label: "Attractions", icon: "📸", tags: ["tourism=attraction", "tourism=museum", "historic=monument"] },
+  { key: "shopping", label: "Shopping", icon: "🛍️", tags: ["shop=mall", "shop=supermarket", "amenity=marketplace"] },
+  { key: "park", label: "Parks", icon: "🌳", tags: ["leisure=park", "leisure=garden"] },
+];
+
+function buildOverpassQuery(lat, lng, tags, radius = 1500) {
+  const tagQ = tags.map(t => {
+    const [k, v] = t.split("=");
+    return `node["${k}"="${v}"](around:${radius},${lat},${lng});`;
+  }).join("");
+  return `[out:json][timeout:10];(${tagQ});out body 8;`;
+}
+
+function NearbyAttractions({ location }) {
+  const [places, setPlaces] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [activeType, setActiveType] = useState("restaurant");
+  const [coords, setCoords] = useState(null);
+  const [geocodeError, setGeocodeError] = useState(false);
+
+  useEffect(() => {
+    if (!location) return;
+    setLoading(true);
+    setError("");
+    setGeocodeError(false);
+    setPlaces([]);
+    setCoords(null);
+
+    fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`, {
+      headers: { "Accept-Language": "en", "User-Agent": "MeetUpIn/1.0" }
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.length > 0) {
+          setCoords({ lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
+        } else {
+          setGeocodeError(true);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        setError("Could not connect to location service.");
+        setLoading(false);
+      });
+  }, [location]);
+
+  useEffect(() => {
+    if (!coords) return;
+    const type = PLACE_TYPES.find(t => t.key === activeType);
+    if (!type) return;
+
+    setLoading(true);
+    setPlaces([]);
+    setError("");
+
+    fetch("https://overpass-api.de/api/interpreter", {
+      method: "POST",
+      body: buildOverpassQuery(coords.lat, coords.lng, type.tags),
+    })
+      .then(r => r.json())
+      .then(data => {
+        setPlaces((data.elements || []).filter(el => el.tags && el.tags.name).slice(0, 8));
+        setLoading(false);
+      })
+      .catch(() => {
+        setError("Could not load nearby places. Try again.");
+        setLoading(false);
+      });
+  }, [coords, activeType]);
+
+  const openInMaps = (place) => {
+    window.open(`https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lon}#map=17/${place.lat}/${place.lon}`, "_blank");
+  };
+
+  const getTypeIcon = () => PLACE_TYPES.find(t => t.key === activeType)?.icon || "📍";
+
+  const getAddress = (tags) =>
+    [tags?.["addr:street"], tags?.["addr:suburb"], tags?.["addr:neighbourhood"], tags?.["addr:city"]]
+      .filter(Boolean)
+      .join(", ");
+
+  return (
+    <div style={{ marginTop: "32px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: "20px", padding: "28px" }}>
+      <div style={{ marginBottom: "20px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
+          <span style={{ fontSize: "22px" }}>📍</span>
+          <h3 style={{ fontSize: "17px", fontWeight: 700, color: "#0f172a", margin: 0 }}>Nearby Attractions</h3>
+        </div>
+        <p style={{ fontSize: "13px", color: "#64748b", margin: 0 }}>Explore places near <strong>{location}</strong></p>
+      </div>
+
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "20px" }}>
+        {PLACE_TYPES.map(t => (
+          <button
+            key={t.key}
+            onClick={() => setActiveType(t.key)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "5px",
+              background: activeType === t.key ? "#0F6E56" : "#f8fafc",
+              color: activeType === t.key ? "#fff" : "#475569",
+              border: activeType === t.key ? "1px solid #0F6E56" : "1px solid #e2e8f0",
+              fontSize: "13px",
+              fontWeight: 600,
+              padding: "7px 14px",
+              borderRadius: "99px",
+              cursor: "pointer",
+              transition: "all 0.18s"
+            }}
+          >
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: "12px" }}>
+          {[1,2,3,4,5,6].map(i => (
+            <div
+              key={i}
+              style={{
+                height: "120px",
+                borderRadius: "14px",
+                background: "linear-gradient(90deg,#f1f5f9 25%,#e2e8f0 50%,#f1f5f9 75%)",
+                backgroundSize: "400% 100%",
+                animation: "shimmer 1.4s infinite"
+              }}
+            />
+          ))}
+          <style>{`@keyframes shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}`}</style>
+        </div>
+      ) : geocodeError ? (
+        <div style={{ textAlign: "center", padding: "28px", background: "#fff7ed", borderRadius: "14px", border: "1px solid #fed7aa" }}>
+          <div style={{ fontSize: "28px", marginBottom: "8px" }}>📌</div>
+          <p style={{ color: "#ea580c", fontSize: "14px", margin: "0 0 8px", fontWeight: 600 }}>Location not found</p>
+          <p style={{ color: "#92400e", fontSize: "13px", margin: 0 }}>Try a more specific location, e.g. Cubbon Park, Bangalore.</p>
+        </div>
+      ) : error ? (
+        <div style={{ textAlign: "center", padding: "28px", background: "#fff7ed", borderRadius: "14px", border: "1px solid #fed7aa" }}>
+          <div style={{ fontSize: "28px", marginBottom: "8px" }}>⚠️</div>
+          <p style={{ color: "#ea580c", fontSize: "14px", margin: 0 }}>{error}</p>
+        </div>
+      ) : !loading && !error && !geocodeError && places.length === 0 && coords ? (
+        <div style={{ textAlign: "center", padding: "28px", background: "#f8fafc", borderRadius: "14px" }}>
+          <div style={{ fontSize: "28px", marginBottom: "8px" }}>🗺️</div>
+          <p style={{ color: "#64748b", fontSize: "14px", margin: 0 }}>
+            No {PLACE_TYPES.find(t => t.key === activeType)?.label.toLowerCase()} found within 1.5km.
+          </p>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: "12px" }}>
+          {places.map(place => {
+            const tags = place.tags || {};
+            const name = tags.name || "Unnamed";
+            const address = getAddress(tags);
+            const cuisine = tags.cuisine;
+            const openingHours = tags.opening_hours;
+            const phone = tags.phone || tags["contact:phone"];
+
+            return (
+              <div
+                key={place.id}
+                onClick={() => openInMaps(place)}
+                style={{
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "14px",
+                  overflow: "hidden",
+                  cursor: "pointer",
+                  transition: "all 0.2s"
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.transform = "translateY(-3px)";
+                  e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,0.09)";
+                  e.currentTarget.style.borderColor = "#0F6E56";
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.transform = "none";
+                  e.currentTarget.style.boxShadow = "none";
+                  e.currentTarget.style.borderColor = "#e2e8f0";
+                }}
+              >
+                <div style={{ height: "72px", background: "linear-gradient(135deg,#f0fdf4,#dcfce7)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "32px", borderBottom: "1px solid #e2e8f0" }}>
+                  {getTypeIcon()}
+                </div>
+                <div style={{ padding: "12px 14px" }}>
+                  <div style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a", marginBottom: "5px", lineHeight: 1.3 }}>{name}</div>
+                  {cuisine && (
+                    <div style={{ fontSize: "11px", color: "#0F6E56", fontWeight: 600, marginBottom: "4px", textTransform: "capitalize" }}>
+                      {cuisine.replace(/;/g, ", ")}
+                    </div>
+                  )}
+                  {address && (
+                    <div style={{ fontSize: "11px", color: "#94a3b8", marginBottom: "6px", lineHeight: 1.4 }}>{address}</div>
+                  )}
+                  {openingHours && (
+                    <div style={{ fontSize: "10px", color: "#64748b", marginBottom: "6px", background: "#f1f5f9", padding: "2px 7px", borderRadius: "6px", display: "inline-block" }}>
+                      {openingHours.length > 24 ? `${openingHours.slice(0, 24)}…` : openingHours}
+                    </div>
+                  )}
+                  {phone && (
+                    <div style={{ fontSize: "11px", color: "#64748b", marginBottom: "4px" }}>{phone}</div>
+                  )}
+                  <div style={{ marginTop: "8px", fontSize: "11px", fontWeight: 600, color: "#0F6E56" }}>View on map →</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── MAP NAVIGATION ───────────────────────────────────────────
+function MapNavigation({ location }) {
+  const [mapUrl, setMapUrl] = useState(null);
+  const [coords, setCoords] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [showMap, setShowMap] = useState(false);
+
+  useEffect(() => {
+    if (!location) return;
+    setLoading(true);
+    setError(false);
+
+    fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`, {
+      headers: { "Accept-Language": "en", "User-Agent": "MeetUpIn/1.0" }
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.length > 0) {
+          const lat = parseFloat(data[0].lat);
+          const lng = parseFloat(data[0].lon);
+          setCoords({ lat, lng });
+          setMapUrl(`https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.008}%2C${lat - 0.005}%2C${lng + 0.008}%2C${lat + 0.005}&layer=mapnik&marker=${lat}%2C${lng}`);
+        } else {
+          setError(true);
+        }
+        setLoading(false);
+      })
+      .catch(() => {
+        setError(true);
+        setLoading(false);
+      });
+  }, [location]);
+
+  const openDirections = () => {
+    if (!coords) return;
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${coords.lat},${coords.lng}`, "_blank");
+  };
+
+  const openOSM = () => {
+    if (!coords) return;
+    window.open(`https://www.openstreetmap.org/?mlat=${coords.lat}&mlon=${coords.lng}#map=16/${coords.lat}/${coords.lng}`, "_blank");
+  };
+
+  return (
+    <div style={{ marginTop: "24px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: "20px", overflow: "hidden" }}>
+      <div style={{ padding: "20px 24px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <span style={{ fontSize: "22px" }}>🗺️</span>
+          <div>
+            <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#0f172a", margin: 0 }}>Map Navigation</h3>
+            <p style={{ fontSize: "12px", color: "#94a3b8", margin: 0 }}>Activity location on map</p>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <button
+            onClick={() => setShowMap(v => !v)}
+            style={{
+              background: showMap ? "#0f172a" : "#f8fafc",
+              color: showMap ? "#fff" : "#475569",
+              border: "1px solid #e2e8f0",
+              fontSize: "13px",
+              fontWeight: 600,
+              padding: "8px 16px",
+              borderRadius: "99px",
+              cursor: "pointer",
+              transition: "all 0.18s"
+            }}
+          >
+            {showMap ? "Hide map" : "Show map"}
+          </button>
+
+          <button
+            onClick={openDirections}
+            disabled={!coords}
+            style={{
+              background: "#0F6E56",
+              color: "#fff",
+              border: "none",
+              fontSize: "13px",
+              fontWeight: 600,
+              padding: "8px 16px",
+              borderRadius: "99px",
+              cursor: coords ? "pointer" : "not-allowed",
+              opacity: coords ? 1 : 0.5,
+              transition: "all 0.18s"
+            }}
+          >
+            Get Directions
+          </button>
+
+          <button
+            onClick={openOSM}
+            disabled={!coords}
+            style={{
+              background: "#3b82f6",
+              color: "#fff",
+              border: "none",
+              fontSize: "13px",
+              fontWeight: 600,
+              padding: "8px 16px",
+              borderRadius: "99px",
+              cursor: coords ? "pointer" : "not-allowed",
+              opacity: coords ? 1 : 0.5,
+              transition: "all 0.18s"
+            }}
+          >
+            Open in Map
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ height: "200px", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontSize: "14px" }}>
+          <span>Finding location…</span>
+        </div>
+      ) : error ? (
+        <div style={{ padding: "20px 24px 24px" }}>
+          <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "12px", padding: "16px 20px" }}>
+            <p style={{ color: "#ea580c", fontSize: "13px", margin: "0 0 8px", fontWeight: 600 }}>Could not locate this address</p>
+            <p style={{ color: "#92400e", fontSize: "12px", margin: 0 }}>
+              Try searching manually on{" "}
+              <a href={`https://www.google.com/maps/search/${encodeURIComponent(location)}`} target="_blank" rel="noreferrer" style={{ color: "#0F6E56", fontWeight: 600 }}>
+                Google Maps
+              </a>
+            </p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={{ padding: "0 24px 16px", display: "flex", alignItems: "center", gap: "8px" }}>
+            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "99px", padding: "6px 14px", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ fontSize: "12px" }}>📍</span>
+              <span style={{ fontSize: "12px", color: "#166534", fontWeight: 600 }}>{location}</span>
+            </div>
+          </div>
+
+          {showMap && (
+            <div style={{ borderTop: "1px solid #e2e8f0" }}>
+              <iframe
+                title="Activity Location Map"
+                src={mapUrl}
+                style={{ width: "100%", height: "320px", border: "none", display: "block" }}
+                loading="lazy"
+              />
+            </div>
+          )}
+
+          <div style={{ padding: "12px 24px 20px" }}>
+            <div style={{ background: "#f8fafc", borderRadius: "12px", padding: "14px 18px", display: "flex", alignItems: "flex-start", gap: "10px" }}>
+              <span style={{ fontSize: "18px", flexShrink: 0 }}>💡</span>
+              <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.6 }}>
+                Click <strong style={{ color: "#0F6E56" }}>Get Directions</strong> to open Google Maps navigation.
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── ACTIVITY DETAIL ──────────────────────────────────────────
 function ActivityPage({ activity: a, setPage }) {
   const { user } = useAuth();
@@ -263,7 +686,6 @@ function ActivityPage({ activity: a, setPage }) {
     if (!user) { setPage("login"); return; }
     setLoading(true);
     try {
-      // FIX: Backend reads user from JWT — userId can be null, backend ignores it
       const res = await api("/joinrequests/", {
         method: "POST",
         body: JSON.stringify({ activityId: a.id }),
@@ -350,6 +772,9 @@ function ActivityPage({ activity: a, setPage }) {
               )}
             </div>
           )}
+
+          <MapNavigation location={a.location} />
+          <NearbyAttractions location={a.location} />
         </div>
 
         <div className="detail-right">
@@ -387,7 +812,6 @@ function ActivityPage({ activity: a, setPage }) {
 }
 
 // ─── CREATE ACTIVITY ──────────────────────────────────────────
-// FIX: Only send the fields backend needs — NO userId — backend reads user from JWT token
 function CreatePage({ setPage }) {
   const [form, setForm] = useState({
     title: "", description: "", category: "",
@@ -412,7 +836,6 @@ function CreatePage({ setPage }) {
     if (!validate()) return;
     setLoading(true);
     try {
-      // FIX: Send ONLY these specific fields — no userId — backend gets user from JWT
       const res = await api("/activities/", {
         method: "POST",
         body: JSON.stringify({
@@ -423,7 +846,6 @@ function CreatePage({ setPage }) {
           eventDate:   form.eventDate,
           eventTime:   form.eventTime,
           maxMembers:  Number(form.maxMembers),
-          // NO userId here — ActivityService.getCurrentUser() handles this
         }),
       });
       if (res.ok) {
@@ -448,7 +870,6 @@ function CreatePage({ setPage }) {
         </div>
 
         <div className="form-body">
-          {/* Title */}
           <div className="form-group">
             <label>Activity Title</label>
             <input
@@ -460,7 +881,6 @@ function CreatePage({ setPage }) {
             {errors.title && <span className="form-error">{errors.title}</span>}
           </div>
 
-          {/* Description */}
           <div className="form-group">
             <label>Description</label>
             <textarea
@@ -473,7 +893,6 @@ function CreatePage({ setPage }) {
             {errors.description && <span className="form-error">{errors.description}</span>}
           </div>
 
-          {/* Category + Location */}
           <div className="form-row">
             <div className="form-group">
               <label>Category</label>
@@ -501,7 +920,6 @@ function CreatePage({ setPage }) {
             </div>
           </div>
 
-          {/* Date + Time + Max Members */}
           <div className="form-row">
             <div className="form-group">
               <label>Date</label>
@@ -535,7 +953,6 @@ function CreatePage({ setPage }) {
             </div>
           </div>
 
-          {/* Visual category picker */}
           <div className="cat-preview">
             {CATEGORIES.map(c => (
               <div
@@ -582,7 +999,6 @@ function DashboardPage({ setPage, setSelectedActivity }) {
   const pending  = myRequests.filter(r => r.requestStatus === "PENDING");
   const rejected = myRequests.filter(r => r.requestStatus === "REJECTED");
 
-  // Delete activity handler
   const handleDelete = async (e, activityId, activityTitle) => {
     e.stopPropagation();
     if (!window.confirm(`Delete "${activityTitle}"? This cannot be undone.`)) return;
@@ -634,7 +1050,6 @@ function DashboardPage({ setPage, setSelectedActivity }) {
         </button>
       </div>
 
-      {/* MY HOSTED ACTIVITIES TAB — with delete button */}
       {tab === "hosted" && (
         myActivities.length === 0 ? (
           <div className="empty-state">
@@ -650,7 +1065,6 @@ function DashboardPage({ setPage, setSelectedActivity }) {
                   activity={a}
                   onClick={() => { setSelectedActivity(a); setPage("activity"); }}
                 />
-                {/* Delete button — only visible on host's own activities */}
                 <button
                   onClick={(e) => handleDelete(e, a.id, a.title)}
                   style={{
@@ -679,7 +1093,6 @@ function DashboardPage({ setPage, setSelectedActivity }) {
         )
       )}
 
-      {/* MY JOIN REQUESTS TAB */}
       {tab === "joined" && (
         myRequests.length === 0 ? (
           <div className="empty-state">
@@ -714,8 +1127,6 @@ function DashboardPage({ setPage, setSelectedActivity }) {
 }
 
 // ─── LOGIN ────────────────────────────────────────────────────
-// FIX: Uses /api/users/me to get the real user ID after login
-// This requires the /me endpoint to exist in UserController.java
 function LoginPage({ setPage }) {
   const { login } = useAuth();
   const [form, setForm]     = useState({ email: "", password: "" });
@@ -725,7 +1136,6 @@ function LoginPage({ setPage }) {
   const handleSubmit = async () => {
     setError(""); setLoading(true);
     try {
-      // Step 1: Get JWT token
       const tokenRes = await api("/api/users/login", {
         method: "POST",
         body: JSON.stringify(form),
@@ -737,8 +1147,6 @@ function LoginPage({ setPage }) {
       }
       const token = await tokenRes.text();
 
-      // Step 2: Call /me to get the real user object with ID
-      // This requires @GetMapping("/me") in UserController.java
       let userData = { email: form.email, fullName: form.email.split("@")[0], id: null };
       try {
         const meRes = await fetch(`${API}/api/users/me`, {
@@ -813,7 +1221,6 @@ function RegisterPage({ setPage }) {
   const handleSubmit = async () => {
     setError(""); setLoading(true);
     try {
-      // Step 1: Register
       const res = await api("/api/users/register", {
         method: "POST",
         body: JSON.stringify(form),
@@ -826,7 +1233,6 @@ function RegisterPage({ setPage }) {
       }
       const newUser = await res.json();
 
-      // Step 2: Auto-login to get token
       const tokenRes = await api("/api/users/login", {
         method: "POST",
         body: JSON.stringify({ email: form.email, password: form.password }),
@@ -834,7 +1240,6 @@ function RegisterPage({ setPage }) {
 
       if (tokenRes.ok) {
         const token = await tokenRes.text();
-        // newUser from register already has the real id
         login(
           { id: newUser.id, fullName: newUser.fullName, email: newUser.email },
           token
@@ -897,7 +1302,7 @@ function RegisterPage({ setPage }) {
 
 // ─── APP SHELL ────────────────────────────────────────────────
 export default function App() {
-  const [page, setPage]                     = useState("home");
+  const [page, setPage] = useState("home");
   const [selectedActivity, setSelectedActivity] = useState(null);
 
   return (
